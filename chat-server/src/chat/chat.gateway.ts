@@ -11,13 +11,12 @@ export class ChatGateway {
   @WebSocketServer()
   server: Server
 
-  @SubscribeMessage({ 
-    event: 'connect', 
-    once: true 
-  })
+  handleConnection(client: Socket) {
+    console.log(`Клиент подключился: ${client.id}`);
+  }
 
-  handleFirstConnect(client:Socket){
-    console.log("клент подключен");
+  handleDisconnect(client: Socket) {
+    console.log(`Клиент отключился: ${client.id}`);
   }
 
   @SubscribeMessage('message')

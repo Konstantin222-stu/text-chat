@@ -17,8 +17,11 @@ const websockets_1 = require("@nestjs/websockets");
 const socket_io_1 = require("socket.io");
 let ChatGateway = class ChatGateway {
     server;
-    handleFirstConnect(client) {
-        console.log("клент подключен");
+    handleConnection(client) {
+        console.log(`Клиент подключился: ${client.id}`);
+    }
+    handleDisconnect(client) {
+        console.log(`Клиент отключился: ${client.id}`);
     }
     handleMessage(data, client) {
         this.server.emit('message', { message: data, clientId: client.id });
@@ -29,15 +32,6 @@ __decorate([
     (0, websockets_1.WebSocketServer)(),
     __metadata("design:type", socket_io_1.Server)
 ], ChatGateway.prototype, "server", void 0);
-__decorate([
-    (0, websockets_1.SubscribeMessage)({
-        event: 'connect',
-        once: true
-    }),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket]),
-    __metadata("design:returntype", void 0)
-], ChatGateway.prototype, "handleFirstConnect", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('message'),
     __param(0, (0, websockets_1.MessageBody)()),
