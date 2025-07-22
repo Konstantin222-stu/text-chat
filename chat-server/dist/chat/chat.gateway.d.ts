@@ -16,6 +16,9 @@ export declare class ChatGateway implements OnGatewayInit, OnGatewayConnection, 
     handleConnection(client: Socket): void;
     handleDisconnect(client: Socket): void;
     private leaveAllRooms;
+    handleTyping(client: Socket, data: {
+        isTyping: boolean;
+    }): void;
     handleJoinRoom(client: Socket, data: JoinRoomData): Promise<void>;
     handleSendMessage(client: Socket, data: MessageData): {
         event: string;

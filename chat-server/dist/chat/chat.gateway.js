@@ -59,6 +59,16 @@ let ChatGateway = class ChatGateway {
         this.userRoomMap.delete(client.id);
         this.userUsernameMap.delete(client.id);
     }
+    handleTyping(client, data) {
+        const roomId = this.userRoomMap.get(client.id);
+        if (!roomId)
+            return;
+        const username = this.userUsernameMap.get(client.id) || 'Unknown';
+        client.to(roomId).emit('typingStatus', {
+            username,
+            isTyping: data.isTyping
+        });
+    }
     async handleJoinRoom(client, data) {
         const { roomId, username } = data;
         if (!roomId || !username) {
@@ -137,6 +147,14 @@ __decorate([
     (0, websockets_1.WebSocketServer)(),
     __metadata("design:type", socket_io_1.Server)
 ], ChatGateway.prototype, "server", void 0);
+__decorate([
+    (0, websockets_1.SubscribeMessage)('typing'),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
+    __metadata("design:returntype", void 0)
+], ChatGateway.prototype, "handleTyping", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('joinRoom'),
     __param(0, (0, websockets_1.ConnectedSocket)()),

@@ -87,6 +87,21 @@ export class ChatGateway
     this.userUsernameMap.delete(client.id);
   }
 
+  @SubscribeMessage('typing')
+  handleTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { isTyping: boolean }
+  ){
+    const roomId =this.userRoomMap.get(client.id)
+    if(!roomId) return
+
+    const username = this.userUsernameMap.get(client.id) || 'Unknown';
+    client.to(roomId).emit('typingStatus', {
+      username,
+      isTyping: data.isTyping
+    })
+  }
+
   @SubscribeMessage('joinRoom')
   async handleJoinRoom(
     @ConnectedSocket() client: Socket,

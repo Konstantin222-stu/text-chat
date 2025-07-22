@@ -25,6 +25,35 @@ export const useChat = () => {
   });
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<string[]>([])
+
+  useEffect(()=>{
+    if(!socket) return
+
+    const onTypingStatus = (data : {username: string; isTyping: boolean}) =>{
+      setTypingUsers(prev => {
+        if(data.isTyping){
+          return [...prev.filter(u => u !== data.username),data.username]
+        }else{
+          return prev.filter( u => u !== data.username )
+        }
+      })
+    }
+
+    socket.on('typingStatus', onTypingStatus)
+
+    return () => {
+      socket.off("typingStatus", onTypingStatus)
+    }
+  }, [socket])
+
+
+  const sendTypingStatus = useCallback((isTyping:boolean) =>{
+    if(socket && room.id){
+      socket.emit('typing',{isTyping})
+    }
+  }, [socket, room.id])
+
 
   // Обработка события kicked
   useEffect(() => {
@@ -242,5 +271,7 @@ export const useChat = () => {
     sendMessage,
     leaveRoom,
     setError,
+    typingUsers,
+    sendTypingStatus,
   };
 };
