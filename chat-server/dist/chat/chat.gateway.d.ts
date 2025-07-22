@@ -1,4 +1,4 @@
-import { OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit } from '@nestjs/websockets';
+import { OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 interface JoinRoomData {
     roomId: string;
@@ -10,7 +10,7 @@ interface MessageData {
 export declare class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
     server: Server;
     private rooms;
-    private userRoomsMap;
+    private userRoomMap;
     private userUsernameMap;
     afterInit(server: Server): void;
     handleConnection(client: Socket): void;
@@ -24,7 +24,7 @@ export declare class ChatGateway implements OnGatewayInit, OnGatewayConnection, 
     } | {
         event: string;
         data: {
-            succes: boolean;
+            success: boolean;
         };
         error?: undefined;
     };

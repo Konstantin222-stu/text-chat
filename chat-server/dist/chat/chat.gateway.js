@@ -18,19 +18,20 @@ const socket_io_1 = require("socket.io");
 let ChatGateway = class ChatGateway {
     server;
     rooms = new Map();
-    userRoomsMap = new Map();
+    userRoomMap = new Map();
     userUsernameMap = new Map();
     afterInit(server) {
-        console.log('WebSocket Сервер проинициализированн');
+        console.log('WebSocket Server initialized');
     }
     handleConnection(client) {
-        console.log('Клиент подключился', client.id);
+        console.log(`Client connected: ${client.id}`);
     }
     handleDisconnect(client) {
-        console.log('Клиент отключился', client.id);
+        console.log(`Client disconnected: ${client.id}`);
+        this.leaveAllRooms(client);
     }
     leaveAllRooms(client) {
-        const roomId = this.userRoomsMap.get(client.id);
+        const roomId = this.userRoomMap.get(client.id);
         if (!roomId)
             return;
         client.leave(roomId);
@@ -39,7 +40,7 @@ let ChatGateway = class ChatGateway {
             return;
         const username = this.userUsernameMap.get(client.id) || 'Unknown';
         for (const user of room) {
-            if (user.id == client.id) {
+            if (user.id === client.id) {
                 room.delete(user);
                 break;
             }
@@ -49,13 +50,13 @@ let ChatGateway = class ChatGateway {
         }
         else {
             const members = Array.from(room).map(u => u.username);
-            this.server.to(roomId).emit("userLeft", {
+            this.server.to(roomId).emit('userLeft', {
                 userId: client.id,
                 username,
-                members
+                members,
             });
         }
-        this.userRoomsMap.delete(client.id);
+        this.userRoomMap.delete(client.id);
         this.userUsernameMap.delete(client.id);
     }
     async handleJoinRoom(client, data) {
@@ -63,22 +64,23 @@ let ChatGateway = class ChatGateway {
         if (!roomId || !username) {
             client.emit('joinRoomResponse', {
                 event: 'error',
-                error: 'Room id and username are required'
+                error: 'Room ID and username are required'
             });
+            return;
         }
         try {
             this.leaveAllRooms(client);
             client.join(roomId);
-            this.userRoomsMap.set(client.id, roomId);
+            this.userRoomMap.set(client.id, roomId);
             this.userUsernameMap.set(client.id, username);
             if (!this.rooms.has(roomId)) {
                 this.rooms.set(roomId, new Set());
             }
             const room = this.rooms.get(roomId);
             if (!room) {
-                client.emit("joinRoomResponse", {
+                client.emit('joinRoomResponse', {
                     event: 'error',
-                    error: 'Failed to join room',
+                    error: 'Failed to join room'
                 });
                 return;
             }
@@ -87,46 +89,47 @@ let ChatGateway = class ChatGateway {
             this.server.to(roomId).emit('userJoined', {
                 userId: client.id,
                 username,
-                members
+                members,
             });
-            client.emit("joinRoomResponse", {
-                event: "roomJoined",
+            client.emit('joinRoomResponse', {
+                event: 'roomJoined',
                 data: {
                     roomId,
                     username,
-                    members
-                }
+                    members,
+                },
             });
         }
         catch (error) {
-            console.error("Error join room", error);
-            client.emit("joinRoomResponce", {
-                event: "error",
-                error: "Internal server error"
+            console.error('Error joining room:', error);
+            client.emit('joinRoomResponse', {
+                event: 'error',
+                error: 'Internal server error'
             });
         }
     }
     handleSendMessage(client, data) {
-        const roomId = this.userRoomsMap.get(client.id);
-        if (!roomId)
-            return { event: "error", error: "You are not in any room" };
-        const username = this.userUsernameMap.get(client.id) || "Unknown";
+        const roomId = this.userRoomMap.get(client.id);
+        if (!roomId) {
+            return { event: 'error', error: 'You are not in any room' };
+        }
+        const username = this.userUsernameMap.get(client.id) || 'Unknown';
         const message = {
             userId: client.id,
             username,
             text: data.text,
             timestamp: new Date().toISOString(),
         };
-        this.server.to(roomId).emit("newMessage", message);
-        return { event: "messageSent", data: { succes: true } };
+        this.server.to(roomId).emit('newMessage', message);
+        return { event: 'messageSent', data: { success: true } };
     }
     handleLeaveRoom(client) {
         this.leaveAllRooms(client);
-        client.emit("leaveRoomResponse", {
+        client.emit('leaveRoomResponse', {
             event: 'roomLeft',
-            data: "You left the room"
+            data: 'You left the room'
         });
-        return { event: "roomLeft", data: "You left room" };
+        return { event: 'roomLeft', data: 'You left the room' };
     }
 };
 exports.ChatGateway = ChatGateway;
@@ -143,7 +146,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], ChatGateway.prototype, "handleJoinRoom", null);
 __decorate([
-    (0, websockets_1.SubscribeMessage)("sendMessage"),
+    (0, websockets_1.SubscribeMessage)('sendMessage'),
     __param(0, (0, websockets_1.ConnectedSocket)()),
     __param(1, (0, websockets_1.MessageBody)()),
     __metadata("design:type", Function),
@@ -151,7 +154,7 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], ChatGateway.prototype, "handleSendMessage", null);
 __decorate([
-    (0, websockets_1.SubscribeMessage)("leaveRoom"),
+    (0, websockets_1.SubscribeMessage)('leaveRoom'),
     __param(0, (0, websockets_1.ConnectedSocket)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [socket_io_1.Socket]),
@@ -162,7 +165,7 @@ exports.ChatGateway = ChatGateway = __decorate([
         cors: {
             origin: '*',
             methods: ['GET', 'POST'],
-        }
+        },
     })
 ], ChatGateway);
 //# sourceMappingURL=chat.gateway.js.map
