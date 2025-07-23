@@ -1,3 +1,4 @@
+import { UseGuards } from '@nestjs/common';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -7,10 +8,17 @@ import {
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
+  WsException,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { WsJwtGuard } from 'src/auth/ws-jwt.guard';
+import { Room } from 'src/models/room.model';
+import * as bcrypt from "bcrypt"
+import { UserRoom } from 'src/models/user-room.model';
+import { Message } from 'src/models/message.model';
+import { User } from 'src/models/user.model';
 
-interface User {
+interface Users {
   id: string;
   username: string;
 }
@@ -25,20 +33,40 @@ interface MessageData {
 }
 
 @WebSocketGateway({
+  namespace: 'chat',
   cors: {
     origin: '*',
+    credentials: true,
     methods: ['GET', 'POST'],
   },
 })
+
+@UseGuards(WsJwtGuard)
 export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
   @WebSocketServer()
   server: Server;
 
-  private rooms: Map<string, Set<User>> = new Map();
+  private rooms: Map<string, Set<Users>> = new Map();
   private userRoomMap: Map<string, string> = new Map();
   private userUsernameMap: Map<string, string> = new Map();
+  
+    private async getRoomMembers(roomId: number): Promise<{id: number, username: string}[]> {
+    const users = await User.findAll({
+      include: [{
+        model: UserRoom,
+        where: { roomId },
+        attributes: [],
+      }],
+      attributes: ['id', 'username'],
+    });
+
+    return users.map(user => ({
+      id: user.id,
+      username: user.username,
+    }));
+  }
 
   afterInit(server: Server) {
     console.log('WebSocket Server initialized');
@@ -167,29 +195,99 @@ export class ChatGateway
     }
   }
 
-  @SubscribeMessage('sendMessage')
-  handleSendMessage(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: MessageData,
-  ) {
-    const roomId = this.userRoomMap.get(client.id);
-    if (!roomId) {
-      return { event: 'error', error: 'You are not in any room' };
-    }
+  @SubscribeMessage('createRoom')
+    async handleCreateRoom(
+      @ConnectedSocket() client: Socket & { user: any },
+      @MessageBody() data: { name: string; isPrivate: boolean; password?: string }
+    ) {
+      const room = await Room.create({
+        name: data.name,
+        isPrivate: data.isPrivate,
+        password: data.isPrivate ? await bcrypt.hash(data.password, 10) : null,
+      });
 
-    const username = this.userUsernameMap.get(client.id) || 'Unknown';
-    const message = {
-      userId: client.id,
-      username,
-      text: data.text,
-      timestamp: new Date().toISOString(),
-    };
+      await UserRoom.create({
+        userId: client.user.sub,
+        roomId: room.id,
+      });
 
-    // Broadcast message to room
-    this.server.to(roomId).emit('newMessage', message);
-
-    return { event: 'messageSent', data: { success: true } };
+      client.join(`room_${room.id}`);
+      client.emit('roomCreated', room);
   }
+
+  @SubscribeMessage('joinPrivateRoom')
+async handleJoinPrivateRoom(
+  @ConnectedSocket() client: Socket & { user: any },
+  @MessageBody() data: { roomId: number; password?: string }
+) {
+  const room = await Room.findByPk(data.roomId);
+  
+  if (!room) {
+    throw new WsException('Room not found');
+  }
+
+  if (room.isPrivate && !(await bcrypt.compare(data.password, room.password))) {
+    throw new WsException('Invalid password');
+  }
+
+  await UserRoom.findOrCreate({
+    where: {
+      userId: client.user.sub,
+      roomId: room.id,
+    },
+  });
+
+  client.join(`room_${room.id}`);
+  
+  const messages = await Message.findAll({
+    where: { roomId: room.id },
+    include: [User],
+    order: [['createdAt', 'ASC']],
+    limit: 50,
+  });
+
+  client.emit('roomJoined', {
+    room,
+    messages,
+    members: await this.getRoomMembers(room.id),
+  });
+}
+
+  @SubscribeMessage('sendMessage')
+  async handleSendMessage(
+    @ConnectedSocket() client: Socket & { user: any },
+    @MessageBody() data: { text: string; roomId: number },
+  ) {
+
+    const message = await Message.create({
+      text: data.text,
+      userId: client.user.sub,
+      roomId: data.roomId,
+    });
+
+    const messageWithUser = await Message.findByPk(message.id, {
+      include: [User],
+    });
+    
+
+    this.server.to(`room_${data.roomId}`).emit('newMessage', messageWithUser);
+  }
+
+  @SubscribeMessage('getHistory')
+    async handleGetHistory(
+      @ConnectedSocket() client: Socket,
+      @MessageBody() roomId: number
+    ) {
+      const message = await Message.findAll({
+        where: {roomId},
+        include: [User],
+        order: [['createdAt', 'ASC']],
+        limit: 50,
+      })
+
+      client.emit('messageHistory', message)
+  }
+
 
   @SubscribeMessage('leaveRoom')
   handleLeaveRoom(@ConnectedSocket() client: Socket) {

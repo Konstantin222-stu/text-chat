@@ -13,13 +13,34 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChatGateway = void 0;
+const common_1 = require("@nestjs/common");
 const websockets_1 = require("@nestjs/websockets");
 const socket_io_1 = require("socket.io");
+const ws_jwt_guard_1 = require("../auth/ws-jwt.guard");
+const room_model_1 = require("../models/room.model");
+const bcrypt = require("bcrypt");
+const user_room_model_1 = require("../models/user-room.model");
+const message_model_1 = require("../models/message.model");
+const user_model_1 = require("../models/user.model");
 let ChatGateway = class ChatGateway {
     server;
     rooms = new Map();
     userRoomMap = new Map();
     userUsernameMap = new Map();
+    async getRoomMembers(roomId) {
+        const users = await user_model_1.User.findAll({
+            include: [{
+                    model: user_room_model_1.UserRoom,
+                    where: { roomId },
+                    attributes: [],
+                }],
+            attributes: ['id', 'username'],
+        });
+        return users.map(user => ({
+            id: user.id,
+            username: user.username,
+        }));
+    }
     afterInit(server) {
         console.log('WebSocket Server initialized');
     }
@@ -118,20 +139,65 @@ let ChatGateway = class ChatGateway {
             });
         }
     }
-    handleSendMessage(client, data) {
-        const roomId = this.userRoomMap.get(client.id);
-        if (!roomId) {
-            return { event: 'error', error: 'You are not in any room' };
+    async handleCreateRoom(client, data) {
+        const room = await room_model_1.Room.create({
+            name: data.name,
+            isPrivate: data.isPrivate,
+            password: data.isPrivate ? await bcrypt.hash(data.password, 10) : null,
+        });
+        await user_room_model_1.UserRoom.create({
+            userId: client.user.sub,
+            roomId: room.id,
+        });
+        client.join(`room_${room.id}`);
+        client.emit('roomCreated', room);
+    }
+    async handleJoinPrivateRoom(client, data) {
+        const room = await room_model_1.Room.findByPk(data.roomId);
+        if (!room) {
+            throw new websockets_1.WsException('Room not found');
         }
-        const username = this.userUsernameMap.get(client.id) || 'Unknown';
-        const message = {
-            userId: client.id,
-            username,
+        if (room.isPrivate && !(await bcrypt.compare(data.password, room.password))) {
+            throw new websockets_1.WsException('Invalid password');
+        }
+        await user_room_model_1.UserRoom.findOrCreate({
+            where: {
+                userId: client.user.sub,
+                roomId: room.id,
+            },
+        });
+        client.join(`room_${room.id}`);
+        const messages = await message_model_1.Message.findAll({
+            where: { roomId: room.id },
+            include: [user_model_1.User],
+            order: [['createdAt', 'ASC']],
+            limit: 50,
+        });
+        client.emit('roomJoined', {
+            room,
+            messages,
+            members: await this.getRoomMembers(room.id),
+        });
+    }
+    async handleSendMessage(client, data) {
+        const message = await message_model_1.Message.create({
             text: data.text,
-            timestamp: new Date().toISOString(),
-        };
-        this.server.to(roomId).emit('newMessage', message);
-        return { event: 'messageSent', data: { success: true } };
+            userId: client.user.sub,
+            roomId: data.roomId,
+        });
+        const messageWithUser = await message_model_1.Message.findByPk(message.id, {
+            include: [user_model_1.User],
+        });
+        this.server.to(`room_${data.roomId}`).emit('newMessage', messageWithUser);
+    }
+    async handleGetHistory(client, roomId) {
+        const message = await message_model_1.Message.findAll({
+            where: { roomId },
+            include: [user_model_1.User],
+            order: [['createdAt', 'ASC']],
+            limit: 50,
+        });
+        client.emit('messageHistory', message);
     }
     handleLeaveRoom(client) {
         this.leaveAllRooms(client);
@@ -164,13 +230,37 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], ChatGateway.prototype, "handleJoinRoom", null);
 __decorate([
+    (0, websockets_1.SubscribeMessage)('createRoom'),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], ChatGateway.prototype, "handleCreateRoom", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)('joinPrivateRoom'),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], ChatGateway.prototype, "handleJoinPrivateRoom", null);
+__decorate([
     (0, websockets_1.SubscribeMessage)('sendMessage'),
     __param(0, (0, websockets_1.ConnectedSocket)()),
     __param(1, (0, websockets_1.MessageBody)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], ChatGateway.prototype, "handleSendMessage", null);
+__decorate([
+    (0, websockets_1.SubscribeMessage)('getHistory'),
+    __param(0, (0, websockets_1.ConnectedSocket)()),
+    __param(1, (0, websockets_1.MessageBody)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [socket_io_1.Socket, Number]),
+    __metadata("design:returntype", Promise)
+], ChatGateway.prototype, "handleGetHistory", null);
 __decorate([
     (0, websockets_1.SubscribeMessage)('leaveRoom'),
     __param(0, (0, websockets_1.ConnectedSocket)()),
@@ -180,10 +270,13 @@ __decorate([
 ], ChatGateway.prototype, "handleLeaveRoom", null);
 exports.ChatGateway = ChatGateway = __decorate([
     (0, websockets_1.WebSocketGateway)({
+        namespace: 'chat',
         cors: {
             origin: '*',
+            credentials: true,
             methods: ['GET', 'POST'],
         },
-    })
+    }),
+    (0, common_1.UseGuards)(ws_jwt_guard_1.WsJwtGuard)
 ], ChatGateway);
 //# sourceMappingURL=chat.gateway.js.map
